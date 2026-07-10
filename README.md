@@ -40,15 +40,34 @@
 ```
 dnsage/
 ├── docker-compose.yml    # 主 Compose 定義
-├── .env                  # 環境變數 (密碼、設定)
+├── .env.example          # 環境變數範本 (去敏)
+├── .gitignore
+├── Makefile              # 管理指令 (setup / pi-hole / clean)
+├── LICENSE               # MIT License
 ├── README.md
-└── donut-hole/           # Donut-Hole 原始碼 (git clone)
+├── .gitmodules           # Git Submodule 定義
+└── donut-hole/           # Donut-Hole 原始碼 (git submodule)
     ├── backend/          # FastAPI 後端
     ├── frontend/         # SvelteKit 前端
     └── postgres/         # 資料庫初始化腳本
 ```
 
 ## 快速開始
+
+### 一鍵安裝
+
+```bash
+make setup
+```
+
+`make setup` 會自動完成：
+1. 檢查 Docker + Docker Compose
+2. 從 `.env.example` 產生 `.env`（自動產生隨機密碼）
+3. 建立 Ollama 外部網路（若不存在）
+4. 透過 submodule 初始化 `donut-hole` 原始碼
+5. 啟動全部服務
+
+### 手動步驟
 
 ```bash
 # 1. 確認 Ollama 模型已就緒
@@ -132,7 +151,11 @@ docker compose build && docker compose up -d
 - **frontend**：反向代理到 backend，輸出至 `:5174`
 - **pgadmin**：僅在 `--profile debug` 時啟動
 
+內部網路：`dnsage-network`（bridge）
+
 ### .env
+
+可從 `.env.example` 複製並修改。`make setup` 會自動產生並填入隨機密碼。
 
 | 變數 | 用途 |
 |---|---|
@@ -143,7 +166,7 @@ docker compose build && docker compose up -d
 | `CORS_ORIGINS` | 允許的前端來源 |
 | `LLM_PROVIDER_CHAIN` | LLM 提供商順序 (`ollama`) |
 | `LLM_MODELS` | 各提供商對應模型 (`{"ollama":"llama3.2"}`) |
-| `EMBEDDING_MODEL` | 向量嵌入模型 (`all-minilm:33m`) |
+| `EMBEDDING_PROVIDER` / `EMBEDDING_MODEL` | 向量嵌入模型 (`ollama` / `all-minilm:33m`) |
 
 ## 常見問題
 
@@ -172,5 +195,6 @@ docker exec pihole pihole setpassword <新密碼>
 
 ## 授權
 
-- Pi-hole: AGPL-3.0
-- Donut-Hole: MIT
+- **dnsage**（本專案）：MIT
+- **Pi-hole**：AGPL-3.0
+- **Donut-Hole**：MIT
