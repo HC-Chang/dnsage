@@ -4,7 +4,9 @@ all: pi-hole
 
 test:
 	dig +short doubleclick.net
-
+st:
+	cat /etc/resolv.conf
+	
 pi-hole:
 	sudo resolvectl dns wlp195s0 127.0.0.1
 	$(MAKE) test
