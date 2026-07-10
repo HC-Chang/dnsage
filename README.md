@@ -1,200 +1,208 @@
-# DNSage — ML 自動學習的 Pi-hole 廣告阻擋系統
+# DNSage
 
-以 Docker Compose 部署的全網路廣告阻擋系統，結合 **Pi-hole (DNS sinkhole)** 與 **Donut-Hole (ML 自動分類)**，利用本地 Ollama LLM 自動分析 DNS 查詢、建立阻擋規則，越用越準。
+> ML-powered Pi-hole ad blocking system that gets smarter over time.
 
-## 系統架構
+A Docker Compose-based network-wide ad blocker combining **Pi-hole (DNS sinkhole)** with **Donut-Hole (ML classification)**. Uses a local Ollama LLM to automatically analyze DNS queries, build blocklists, and improve with every classification.
+
+## Description
+
+DNSage automates DNS-based ad blocking by feeding Pi-hole's query log into a local LLM pipeline. Each unclassified domain is analyzed by `llama3.2` (ad/tracker/legit), embedded into a vector database via `all-minilm`, and presented in a Web UI for review. Approved domains are exported as a Pi-hole blocklist — no cloud dependency, no manual rule writing.
+
+## Architecture
 
 ```
-使用者裝置 → DNS 查詢 → Pi-hole (DNS sinkhole)
-                            │
-                    比對 blocklist → 命中 → 回傳 0.0.0.0 (封鎖)
-                            │ 未命中
-                            └→ 上游 DNS → 真實 IP
-                            │
-                    (每 5 分鐘) Donut-Hole
-                         ├─ 從 Pi-hole API 拉取新域名
-                         ├─ llama3.2 分類 (廣告/追蹤/正常)
-                         ├─ all-minilm 向量嵌入比對歷史決定
-                         └─ Web UI 審核 → 匯出 blocklist → Pi-hole
+User Devices → DNS Query → Pi-hole (DNS sinkhole)
+                                │
+                    Match blocklist → hit → 0.0.0.0 (blocked)
+                                │ miss
+                                └→ Upstream DNS → Real IP
+                                │
+                    (every 5 min) Donut-Hole
+                        ├─ Fetch new domains from Pi-hole API
+                        ├─ llama3.2 classification (ad/tracker/legit)
+                        ├─ all-minilm embedding + similarity matching
+                        └─ Web UI review → export blocklist → Pi-hole
 ```
 
-## 服務一覽
+## Services
 
-| 容器 | 用途 | 連接埠 |
-|---|---|---|
-| `pihole` | DNS sinkhole + 廣告封鎖 | `:53` (DNS), `:80` (Web) |
-| `donut-hole-postgres` | PostgreSQL + pgvector 向量資料庫 | `127.0.0.1:5432` |
-| `donut-hole-backend` | FastAPI 分類引擎 + 排程器 | 內部 `:8343` |
-| `donut-hole-frontend` | SvelteKit 審核 UI | `:5174` |
-| `ollama` (既存) | LLM 服務 (llama3.2 + all-minilm) | `:11434` |
+| Container | Role | Port |
+|-----------|------|------|
+| `pihole` | DNS sinkhole + ad blocking | `:53` (DNS), `:80` (Web) |
+| `donut-hole-postgres` | PostgreSQL + pgvector | `127.0.0.1:5432` |
+| `donut-hole-backend` | FastAPI classification engine | internal `:8343` |
+| `donut-hole-frontend` | SvelteKit review UI | `:5174` |
+| `ollama` (existing) | LLM (llama3.2 + all-minilm) | `:11434` |
 
-## 前置需求
+## Prerequisites
 
 - Docker + Docker Compose
-- Ollama 服務 (已運作)，需載入以下模型：
-  - `llama3.2` — 域名分類
-  - `all-minilm:33m` — 向量嵌入 (相似度學習)
+- A running Ollama instance with these models pulled:
+  - `llama3.2` — domain classification
+  - `all-minilm:33m` — vector embeddings
 
-## 目錄結構
+## Directory Layout
 
 ```
 dnsage/
-├── docker-compose.yml    # 主 Compose 定義
-├── .env.example          # 環境變數範本 (去敏)
+├── docker-compose.yml    # Main Compose definition
+├── .env.example          # Sanitized env template
 ├── .gitignore
-├── Makefile              # 管理指令 (setup / pi-hole / clean)
-├── LICENSE               # MIT License
+├── Makefile              # Commands: setup / pi-hole / clean
+├── LICENSE               # MIT
 ├── README.md
-├── .gitmodules           # Git Submodule 定義
-└── donut-hole/           # Donut-Hole 原始碼 (git submodule)
-    ├── backend/          # FastAPI 後端
-    ├── frontend/         # SvelteKit 前端
-    └── postgres/         # 資料庫初始化腳本
+├── .gitmodules           # Git submodule definition
+└── donut-hole/           # Donut-Hole source (git submodule)
+    ├── backend/          # FastAPI backend
+    ├── frontend/         # SvelteKit frontend
+    └── postgres/         # DB init scripts
 ```
 
-## 快速開始
+## Quick Start
 
-### 一鍵安裝
+### One-command setup
 
 ```bash
 make setup
 ```
 
-`make setup` 會自動完成：
-1. 檢查 Docker + Docker Compose
-2. 從 `.env.example` 產生 `.env`（自動產生隨機密碼）
-3. 建立 Ollama 外部網路（若不存在）
-4. 透過 submodule 初始化 `donut-hole` 原始碼
-5. 啟動全部服務
+`make setup` will:
+1. Check Docker + Docker Compose
+2. Generate `.env` from `.env.example` (with random secrets)
+3. Create the Ollama external network if missing
+4. Initialize the `donut-hole` submodule
+5. Start all services
 
-### 手動步驟
+### Manual steps
 
 ```bash
-# 1. 確認 Ollama 模型已就緒
+# 1. Verify Ollama models are ready
 docker exec ollama ollama list | grep -E "llama3.2|all-minilm"
 
-# 2. 啟動全部服務
+# 2. Start all services
 docker compose up -d
 
-# 3. 檢查健康狀態
+# 3. Check health
 docker compose ps
 
-# 4. 將路由器 DHCP DNS 指向本機 IP (e.g. 192.168.1.198)
+# 4. Point your router's DHCP DNS to this host (e.g. 192.168.1.198)
 ```
 
-首次啟動時 Pi-hole 會自動下載 StevenBlack 封鎖清單 (~84k 域名) 並執行 gravity 更新。
+On first boot, Pi-hole automatically downloads the StevenBlack blocklist (~84k domains) and runs gravity update.
 
-## 登入資訊
+## Login Info
 
-| 服務 | 網址 | 帳號 | 密碼 |
-|---|---|---|---|
-| Pi-hole Admin | `http://<host-ip>:80/admin/` | — | 見 `.env` `PIHOLE_PASSWORD` |
-| Donut-Hole UI | `http://<host-ip>:5174/` | `admin` | 見 `.env` `ADMIN_PASSWORD` |
+| Service | URL | Username | Password |
+|---------|-----|----------|----------|
+| Pi-hole Admin | `http://<host-ip>:80/admin/` | — | See `PIHOLE_PASSWORD` in `.env` |
+| Donut-Hole UI | `http://<host-ip>:5174/` | `admin` | See `ADMIN_PASSWORD` in `.env` |
 
-## ML 學習流程
+## ML Pipeline
 
-### 自動化週期
+### Automation cycle
 
 ```
-[Pi-hole 累積 DNS 查詢]
-        ↓ (每 5 分鐘)
-[Donut-Hole 拉取日誌]
+[Pi-hole accumulates DNS queries]
+        ↓ (every 5 min)
+[Donut-Hole fetches query log]
         ↓
-[llama3.2 分類未處理域名]
-        ↓ (分類結果)
-[all-minilm 產生向量嵌入]
+[llama3.2 classifies unprocessed domains]
+        ↓ (classification result)
+[all-minilm generates vector embeddings]
         ↓
-[存入 PostgreSQL + pgvector]
+[Stored in PostgreSQL + pgvector]
         ↓
-[Web UI 待審核清單]
-        ↓ (使用者 Approve / Reject)
-[匯出 hosts 格式 blocklist]
-        ↓ (Pi-hole 執行 Update Gravity)
-[規則生效，新域名自動被封鎖]
+[Web UI pending review]
+        ↓ (user Approve / Reject)
+[Export hosts-format blocklist]
+        ↓ (Pi-hole runs Update Gravity)
+[Rules active, new domains blocked automatically]
 ```
 
-### 學習曲線
+### Learning curve
 
-- **初期**：每個新域名都送 LLM 分類 (~1-2 秒/次)
-- **中期**：向量相似度找到已分類域名 → 直接建議，不需 LLM
-- **成熟期**：95% 以上域名瞬間比對完成，只需偶爾審核新域名
+- **Early**: every new domain hits the LLM (~1-2 s/domain)
+- **Mid**: vector similarity finds pre-classified domains → instant suggestion, no LLM needed
+- **Mature**: 95%+ domains matched instantly; only occasional review of truly new domains
 
-### 管理指令
+### Management commands
 
 ```bash
-# 查看即時日誌
+# Live logs
 docker compose logs -f
 
-# 查看特定服務日誌
+# Specific service logs
 docker compose logs backend -f
 
-# 手動重啟單一服務
+# Restart a single service
 docker compose restart backend
 
-# 全部重啟
+# Restart everything
 docker compose restart
 
-# 停止並清除
+# Stop and clean up
 docker compose down
 
-# 重建後啟動 (更新代碼後)
+# Rebuild and start (after code changes)
 docker compose build && docker compose up -d
 ```
 
-## 設定檔說明
+## Configuration
 
 ### docker-compose.yml
 
-主要服務定義：
-- **pihole**：上游 DNS 設為 Quad9 + Cloudflare (`9.9.9.9;1.1.1.1`)
-- **backend**：透過 Ollama 外部網路 (`ollama_ollama-docker`) 連接 LLM
-- **frontend**：反向代理到 backend，輸出至 `:5174`
-- **pgadmin**：僅在 `--profile debug` 時啟動
+- **pihole**: upstream DNS set to Quad9 + Cloudflare (`9.9.9.9;1.1.1.1`)
+- **backend**: connects to Ollama via external network (`ollama_ollama-docker`)
+- **frontend**: reverse-proxies to backend, exposed on `:5174`
+- **pgadmin**: debug profile only (`--profile debug`)
 
-內部網路：`dnsage-network`（bridge）
+Internal network: `dnsage-network` (bridge)
 
 ### .env
 
-可從 `.env.example` 複製並修改。`make setup` 會自動產生並填入隨機密碼。
+Copy `.env.example` to `.env` and edit. `make setup` does this automatically with random secrets.
 
-| 變數 | 用途 |
-|---|---|
-| `PIHOLE_PASSWORD` | Pi-hole Web 密碼 |
-| `POSTGRES_PASSWORD` | PostgreSQL 密碼 |
-| `JWT_SECRET` | Donut-Hole JWT 簽章金鑰 |
-| `ADMIN_USERNAME` / `ADMIN_PASSWORD` | Donut-Hole 登入帳密 |
-| `CORS_ORIGINS` | 允許的前端來源 |
-| `LLM_PROVIDER_CHAIN` | LLM 提供商順序 (`ollama`) |
-| `LLM_MODELS` | 各提供商對應模型 (`{"ollama":"llama3.2"}`) |
-| `EMBEDDING_PROVIDER` / `EMBEDDING_MODEL` | 向量嵌入模型 (`ollama` / `all-minilm:33m`) |
+| Variable | Purpose |
+|----------|---------|
+| `PIHOLE_PASSWORD` | Pi-hole web password |
+| `POSTGRES_PASSWORD` | PostgreSQL password |
+| `JWT_SECRET` | Donut-Hole JWT signing key |
+| `ADMIN_USERNAME` / `ADMIN_PASSWORD` | Donut-Hole login |
+| `CORS_ORIGINS` | Allowed frontend origins |
+| `LLM_PROVIDER_CHAIN` | LLM provider order (`ollama`) |
+| `LLM_MODELS` | Per-provider models (`{"ollama":"llama3.2"}`) |
+| `EMBEDDING_PROVIDER` / `EMBEDDING_MODEL` | Embedding model (`ollama` / `all-minilm:33m`) |
 
-## 常見問題
+## FAQ
 
-### DNS 查詢 `@<host-ip>` 超時？
+### DNS lookup to `<host-ip>` times out?
 
-本機無法透過外部 IP 存取 Docker 對應的 DNS 埠（hairpin NAT），但同一區域網路的其他裝置可以正常使用。從本機測試請用 `dig @127.0.0.1`。
+The host machine cannot reach its own Docker-mapped DNS port via the external IP (hairpin NAT). Other devices on the same LAN work fine. For local testing use `dig @127.0.0.1`.
 
-### Donut-Hole 後端無法連線到 Pi-hole？
+### Donut-Hole backend can't reach Pi-hole?
 
-確認 `PIHOLE_URL` 設為 `http://pihole:80`（Docker 內部網路名稱），不要用 IP。
+Make sure `PIHOLE_URL` is set to `http://pihole:80` (Docker internal network name), not an IP.
 
-### Ollama 連線失敗？
+### Ollama connection failed?
 
-確認 `ollama_ollama-docker` 外部網路存在：
+Verify the `ollama_ollama-docker` external network exists:
+
 ```bash
 docker network ls | grep ollama
 ```
-若 Ollama 非使用 docker-compose，請修改 `docker-compose.yml` 中的 `OLLAMA_BASE_URL` 為實際 IP。
 
-### 如何重置 Pi-hole 密碼？
+If Ollama wasn't started via Docker Compose, update `OLLAMA_BASE_URL` in `docker-compose.yml` to the actual IP.
+
+### How to reset Pi-hole password?
 
 ```bash
-docker exec pihole pihole setpassword <新密碼>
+docker exec pihole pihole setpassword <new-password>
 ```
-並同步更新 `.env` 中的 `PIHOLE_PASSWORD`。
 
-## 授權
+Then update `PIHOLE_PASSWORD` in `.env`.
 
-- **dnsage**（本專案）：MIT
-- **Pi-hole**：AGPL-3.0
-- **Donut-Hole**：MIT
+## License
+
+- **dnsage** (this project): MIT
+- **Pi-hole**: AGPL-3.0
+- **Donut-Hole**: MIT
