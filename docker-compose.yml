@@ -1,0 +1,131 @@
+services:
+  pihole:
+    image: pihole/pihole:latest
+    container_name: pihole
+    ports:
+      - "53:53/tcp"
+      - "53:53/udp"
+      - "80:80/tcp"
+    environment:
+      TZ: Asia/Taipei
+      WEBPASSWORD: ${PIHOLE_PASSWORD:-admin}
+      PIHOLE_DNS_: 9.9.9.9;1.1.1.1
+      PIHOLE_INTERFACE: eth0
+      DNSSEC: "true"
+      CONDITIONAL_FORWARDING: "false"
+    volumes:
+      - pihole_etc:/etc/pihole
+      - pihole_dnsmasq:/etc/dnsmasq.d
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "sh", "-c", "dig pi.hole @127.0.0.1 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - dnsage-network
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: donut-hole-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-donuthole}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-donuthole_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-donuthole}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./donut-hole/postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-donuthole}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - dnsage-network
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: donut-hole-pgadmin
+    profiles:
+      - debug
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@donuthole.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    ports:
+      - "127.0.0.1:5050:80"
+    networks:
+      - dnsage-network
+
+  backend:
+    build:
+      context: ./donut-hole/backend
+      dockerfile: Dockerfile
+    container_name: donut-hole-backend
+    env_file:
+      - .env
+    environment:
+      CORS_ORIGINS: ${CORS_ORIGINS}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-donuthole}:${POSTGRES_PASSWORD:-donuthole_secret}@postgres:5432/${POSTGRES_DB:-donuthole}
+      PIHOLE_URL: http://pihole:80
+      PIHOLE_PASSWORD: ${PIHOLE_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      OLLAMA_BASE_URL: http://ollama:11434
+      EXPORT_PATH: /app/exports
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      LLM_PROVIDER_CHAIN: ollama
+      LLM_MODELS: ${LLM_MODELS:-{"ollama":"llama3.2"}}
+      EMBEDDING_PROVIDER: ollama
+      EMBEDDING_MODEL: all-minilm:33m
+      EMBEDDING_DIMENSIONS: 384
+    volumes:
+      - donuthole_exports:/app/exports
+    expose:
+      - "8343"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8343/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - dnsage-network
+      - ollama-docker
+
+  frontend:
+    build:
+      context: ./donut-hole/frontend
+      dockerfile: Dockerfile
+    container_name: donut-hole-frontend
+    environment:
+      BACKEND_URL: http://backend:8343
+      PROTOCOL_HEADER: x-forwarded-proto
+      HOST_HEADER: x-forwarded-host
+    ports:
+      - "5174:5173"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - dnsage-network
+
+volumes:
+  pihole_etc:
+  pihole_dnsmasq:
+  postgres_data:
+  pgadmin_data:
+  donuthole_exports:
+
+networks:
+  dnsage-network:
+    driver: bridge
+  ollama-docker:
+    external: true
+    name: ollama_ollama-docker

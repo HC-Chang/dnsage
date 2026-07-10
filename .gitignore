@@ -1,0 +1,30 @@
+# Environment
+.env
+.env.local
+
+# Runtime
+exports/
+config-backup/
+pgadmin_data/
+
+# Editors
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDEs
+.idea/
+.vscode/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
