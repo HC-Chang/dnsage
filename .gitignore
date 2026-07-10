@@ -4,7 +4,6 @@
 
 # Runtime
 exports/
-config-backup/
 pgadmin_data/
 
 # Editors
