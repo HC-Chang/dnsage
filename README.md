@@ -28,10 +28,11 @@ User Devices → DNS Query → Pi-hole (DNS sinkhole)
 
 | Container | Role | Port |
 |-----------|------|------|
-| `pihole` | DNS sinkhole + ad blocking | `:53` (DNS), `:80` (Web) |
+| `pihole` | DNS sinkhole + ad blocking | `:53` (DNS), internal `:80` (Web) |
 | `donut-hole-postgres` | PostgreSQL + pgvector | `127.0.0.1:5432` |
 | `donut-hole-backend` | FastAPI classification engine | internal `:8343` |
-| `donut-hole-frontend` | SvelteKit review UI | `:5174` |
+| `donut-hole-frontend` | SvelteKit review UI | internal `:5173` |
+| `dnsage-caddy` | HTTPS reverse proxy | `:80`, `:443` |
 | `ollama` (existing) | LLM (llama3.2 + all-minilm) | `:11434` |
 
 ## Prerequisites
@@ -94,8 +95,36 @@ On first boot, Pi-hole automatically downloads the StevenBlack blocklist (~84k d
 
 | Service | URL | Username | Password |
 |---------|-----|----------|----------|
-| Pi-hole Admin | `http://<host-ip>:80/admin/` | — | See `PIHOLE_PASSWORD` in `.env` |
-| Donut-Hole UI | `http://<host-ip>:5174/` | `admin` | See `ADMIN_PASSWORD` in `.env` |
+| Pi-hole Admin | `https://pihole.localhost/admin/` | — | See `PIHOLE_PASSWORD` in `.env` |
+| Donut-Hole UI | `https://localhost/` | `admin` | See `ADMIN_PASSWORD` in `.env` |
+
+Default local URLs:
+
+- Pi-hole Admin: <https://pihole.localhost/admin/>
+- Donut-Hole UI: <https://localhost/>
+
+If `PIHOLE_DOMAIN` or `DOMAIN` is changed in `.env`, use the corresponding URLs instead.
+
+### HTTPS deployment
+
+The root Compose stack uses Caddy as the only public web entrypoint. Caddy automatically obtains and renews certificates from Let’s Encrypt when `DOMAIN` and `PIHOLE_DOMAIN` are real DNS names resolving to this host and TCP ports 80/443 are reachable from the internet. The frontend and Pi-hole web server are not published directly on host ports.
+
+For a public deployment, set these values in `.env` before starting:
+
+```dotenv
+DOMAIN=dnsage.example.com
+PIHOLE_DOMAIN=pihole.dnsage.example.com
+CORS_ORIGINS=https://dnsage.example.com
+```
+
+Then create DNS records for both names and run:
+
+```bash
+docker compose up -d --build
+docker compose logs -f caddy
+```
+
+The default `localhost` values are intended for local testing and use Caddy’s local certificate authority, which may need to be trusted by your browser.
 
 ## ML Pipeline
 
@@ -153,7 +182,8 @@ docker compose build && docker compose up -d
 
 - **pihole**: upstream DNS set to Quad9 + Cloudflare (`9.9.9.9;1.1.1.1`)
 - **backend**: connects to Ollama via external network (`ollama_ollama-docker`)
-- **frontend**: reverse-proxies to backend, exposed on `:5174`
+- **frontend**: production SvelteKit Node server, reachable only through Caddy
+- **caddy**: terminates HTTPS and reverse-proxies the UI and Pi-hole admin site
 - **pgadmin**: debug profile only (`--profile debug`)
 
 Internal network: `dnsage-network` (bridge)

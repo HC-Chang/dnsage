@@ -1,4 +1,4 @@
-.PHONY: all test pi-hole clean setup
+.PHONY: all test st pi-hole clean setup
 
 all: pi-hole
 
@@ -62,7 +62,7 @@ setup:
 	@echo ""
 	@echo "==> Setup complete!"
 	@echo ""
-	@echo "  Pi-hole Admin: http://$$(hostname -I | awk '{print $$1}'):80/admin/"
-	@echo "  Donut-Hole UI: http://$$(hostname -I | awk '{print $$1}'):5174/"
+	@echo "  Donut-Hole UI: https://$$(grep '^DOMAIN=' .env | cut -d= -f2-)/"
+	@echo "  Pi-hole Admin: https://$$(grep '^PIHOLE_DOMAIN=' .env | cut -d= -f2-)/admin/"
 	@echo ""
 	@grep -E "^(ADMIN_USERNAME|PIHOLE_PASSWORD)" .env

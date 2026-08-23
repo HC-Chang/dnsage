@@ -5,7 +5,6 @@ services:
     ports:
       - "53:53/tcp"
       - "53:53/udp"
-      - "80:80/tcp"
     environment:
       TZ: Asia/Taipei
       WEBPASSWORD: ${PIHOLE_PASSWORD:-admin}
@@ -68,7 +67,7 @@ services:
     env_file:
       - .env
     environment:
-      CORS_ORIGINS: ${CORS_ORIGINS}
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://localhost}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-donuthole}:${POSTGRES_PASSWORD:-donuthole_secret}@postgres:5432/${POSTGRES_DB:-donuthole}
       PIHOLE_URL: http://pihole:80
       PIHOLE_PASSWORD: ${PIHOLE_PASSWORD}
@@ -108,11 +107,36 @@ services:
       BACKEND_URL: http://backend:8343
       PROTOCOL_HEADER: x-forwarded-proto
       HOST_HEADER: x-forwarded-host
-    ports:
-      - "5174:5173"
+      HOST: 0.0.0.0
+      PORT: 5173
+    expose:
+      - "5173"
     depends_on:
       backend:
         condition: service_healthy
+    networks:
+      - dnsage-network
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: dnsage-caddy
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+      PIHOLE_DOMAIN: ${PIHOLE_DOMAIN:-pihole.localhost}
+    ports:
+      - "80:80/tcp"
+      - "443:443/tcp"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      pihole:
+        condition: service_started
+      frontend:
+        condition: service_started
+    restart: unless-stopped
     networks:
       - dnsage-network
 
@@ -122,6 +146,8 @@ volumes:
   postgres_data:
   pgadmin_data:
   donuthole_exports:
+  caddy_data:
+  caddy_config:
 
 networks:
   dnsage-network:
