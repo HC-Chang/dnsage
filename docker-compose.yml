@@ -1,15 +1,21 @@
 services:
   pihole:
+    # Pi-hole v6 onward: the project does not publish pinned minor tags and its
+    # config/data format can change across major releases, so 'latest' is the
+    # officially recommended channel. Revisit if reproducibility is required.
     image: pihole/pihole:latest
     container_name: pihole
     ports:
-      - "53:53/tcp"
-      - "53:53/udp"
+      # Bind to the LAN interface so other machines can use this DNS, without
+      # exposing it to the public internet (avoids becoming an open resolver).
+      - "${DNS_BIND:-127.0.0.1}:53:53/tcp"
+      - "${DNS_BIND:-127.0.0.1}:53:53/udp"
     environment:
-      TZ: Asia/Taipei
-      WEBPASSWORD: ${PIHOLE_PASSWORD:-admin}
-      PIHOLE_DNS_: 9.9.9.9;1.1.1.1
-      PIHOLE_INTERFACE: eth0
+      TZ: ${TZ:-Asia/Taipei}
+      # Fail fast if no password is supplied instead of silently using 'admin'.
+      WEBPASSWORD: ${PIHOLE_PASSWORD:?PIHOLE_PASSWORD must be set in .env}
+      PIHOLE_DNS_: ${PIHOLE_DNS_:-9.9.9.9;1.1.1.1}
+      PIHOLE_INTERFACE: ${PIHOLE_INTERFACE:-eth0}
       DNSSEC: "true"
       CONDITIONAL_FORWARDING: "false"
     volumes:
@@ -28,8 +34,8 @@ services:
     image: pgvector/pgvector:pg16
     container_name: donut-hole-postgres
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-donuthole}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-donuthole_secret}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER must be set in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
       POSTGRES_DB: ${POSTGRES_DB:-donuthole}
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -45,13 +51,13 @@ services:
       - dnsage-network
 
   pgadmin:
-    image: dpage/pgadmin4:latest
+    image: dpage/pgadmin4:9.17
     container_name: donut-hole-pgadmin
     profiles:
       - debug
     environment:
       PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@donuthole.com}
-      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:?PGADMIN_PASSWORD must be set in .env}
     volumes:
       - pgadmin_data:/var/lib/pgadmin
     ports:
@@ -68,19 +74,24 @@ services:
       - .env
     environment:
       CORS_ORIGINS: ${CORS_ORIGINS:-https://localhost}
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-donuthole}:${POSTGRES_PASSWORD:-donuthole_secret}@postgres:5432/${POSTGRES_DB:-donuthole}
+      # Assemble the DSN from dedicated DB_* variables so the password is not
+      # repeated inline in the compose file and survives special characters
+      # ("," "@" etc. would otherwise need URL-encoding).
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:?}:${DB_PASSWORD:?DB_PASSWORD must be set in .env}@postgres:5432/${POSTGRES_DB:-donuthole}
       PIHOLE_URL: http://pihole:80
-      PIHOLE_PASSWORD: ${PIHOLE_PASSWORD}
-      JWT_SECRET: ${JWT_SECRET}
-      OLLAMA_BASE_URL: http://ollama:11434
+      PIHOLE_PASSWORD: ${PIHOLE_PASSWORD:?}
+      JWT_SECRET: "${JWT_SECRET:?JWT_SECRET must be set in .env (generate: openssl rand -hex 32)}"
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
       EXPORT_PATH: /app/exports
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
-      LLM_PROVIDER_CHAIN: ollama
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?ADMIN_PASSWORD must be set in .env}
+      # LLM / embedding config is owned by .env; only parameterize references here
+      # so values have a single source of truth.
+      LLM_PROVIDER_CHAIN: ${LLM_PROVIDER_CHAIN:-ollama}
       LLM_MODELS: ${LLM_MODELS:-{"ollama":"llama3.2"}}
-      EMBEDDING_PROVIDER: ollama
-      EMBEDDING_MODEL: all-minilm:33m
-      EMBEDDING_DIMENSIONS: 384
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-ollama}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-all-minilm:33m}
+      EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-384}
     volumes:
       - donuthole_exports:/app/exports
     expose:
@@ -118,7 +129,7 @@ services:
       - dnsage-network
 
   caddy:
-    image: caddy:2-alpine
+    image: caddy:2.11-alpine
     container_name: dnsage-caddy
     environment:
       DOMAIN: ${DOMAIN:-localhost}
