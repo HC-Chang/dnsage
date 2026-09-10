@@ -1,18 +1,33 @@
-.PHONY: all test st pi-hole clean setup
+.PHONY: all test st pi-hole clean setup status
+
+DNS_BIND ?= $(shell grep '^DNS_BIND=' .env 2>/dev/null | cut -d= -f2)
+WIFI_IFACE ?= $(shell ip route show default | awk '/default/ {print $$5}' | head -1)
 
 all: pi-hole
 
 test:
-	dig +short doubleclick.net
+	dig +short +timeout=3 doubleclick.net
 st:
 	cat /etc/resolv.conf
-	
+
+status:
+	@echo "==> Current DNS settings:"
+	@resolvectl status $(WIFI_IFACE) 2>/dev/null | grep -A2 "DNS Servers" || echo "   (unavailable)"
+	@echo ""
+	@echo "==> .env DNS_BIND: $(DNS_BIND)"
+	@echo "==> WiFi interface: $(WIFI_IFACE)"
+	@echo ""
+	@echo "==> Pi-hole status:"
+	@docker ps --filter "name=pihole" --format "   {{.Status}}"
+
 pi-hole:
-	sudo resolvectl dns wlp195s0 127.0.0.1
+	sudo resolvectl dns $(WIFI_IFACE) $(DNS_BIND)
+	@echo "==> DNS set to $(DNS_BIND) (interface: $(WIFI_IFACE))"
 	$(MAKE) test
 
 clean:
-	sudo resolvectl dns wlp195s0 192.168.1.1
+	sudo resolvectl dns $(WIFI_IFACE) 192.168.1.1
+	@echo "==> DNS reset to 192.168.1.1 (interface: $(WIFI_IFACE))"
 	$(MAKE) test
 
 setup:
